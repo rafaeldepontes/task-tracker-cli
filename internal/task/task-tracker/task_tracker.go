@@ -3,6 +3,7 @@ package tasktracker
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
@@ -20,9 +21,13 @@ const (
 	OwnerPropertyMode = 0644
 
 	// Enum
-	InitStatus  model.StatusTask = "init"
-	DoingStatus model.StatusTask = "doing"
-	DoneStatus  model.StatusTask = "done"
+	InitStatus  model.StatusTask = "TODO"
+	DoingStatus model.StatusTask = "In progress"
+	DoneStatus  model.StatusTask = "Done"
+
+	// Text Format
+	TaskInfo              = "Task %d - %s\nProgress: %s\nCreated: %s\nUpdated last: %s\n\n"
+	BrazilianFormatLayout = "02/01/2006 15:04:05"
 )
 
 type RootCmd struct {
@@ -137,8 +142,10 @@ func (exec *RootCmd) MarkInProgressTask() *cobra.Command {
 			if err != nil {
 				return
 			}
+			now := time.Now()
 
 			tasks[pos].Status = DoingStatus
+			tasks[pos].UpdatedAt = &now
 			err = writeFile(tasks)
 			if err != nil {
 				return
@@ -164,8 +171,10 @@ func (exec *RootCmd) MarkDoneTask() *cobra.Command {
 			if err != nil {
 				return
 			}
+			now := time.Now()
 
 			tasks[pos].Status = DoneStatus
+			tasks[pos].UpdatedAt = &now
 			err = writeFile(tasks)
 			if err != nil {
 				return
@@ -179,13 +188,71 @@ func (exec *RootCmd) MarkDoneTask() *cobra.Command {
 // TODO: Check if it's possible to use a switch case instead of multiple functions doing basically the same thing
 func (exec *RootCmd) ListTasks() *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
+		Use:   "list [filter]",
 		Short: `List all the task, using some flags to define if you want some filters`,
-		Args:  cobra.ExactArgs(1),
+		Long: `List all the tasks, if a filter is specified than the filter is considered.
+
+		Else it will show all the tasks no matter the status.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			// TODO: Implement this
+			action := "all"
+			if len(args) > 0 {
+				action = args[0]
+			}
+
+			tasks, err := readFile()
+			if err != nil {
+				return
+			}
+
+			println()
+			switch action {
+			case "all":
+				var updatedAt string
+				var createdAt string
+				for _, t := range tasks {
+					printTask(&t, &updatedAt, &createdAt)
+				}
+
+			case "done":
+				var updatedAt string
+				var createdAt string
+				for _, t := range tasks {
+					if t.Status == DoneStatus {
+						printTask(&t, &updatedAt, &createdAt)
+					}
+				}
+
+			case "todo":
+				var updatedAt string
+				var createdAt string
+				for _, t := range tasks {
+					if t.Status == InitStatus {
+						printTask(&t, &updatedAt, &createdAt)
+					}
+				}
+
+			case "in-progress":
+				var updatedAt string
+				var createdAt string
+				for _, t := range tasks {
+					if t.Status == DoingStatus {
+						printTask(&t, &updatedAt, &createdAt)
+					}
+				}
+			}
 		},
 	}
+}
+
+func printTask(t *model.Task, updatedAt *string, createdAt *string) {
+	if t.UpdatedAt == nil {
+		*updatedAt = "-"
+	} else {
+		*updatedAt = t.UpdatedAt.Format(BrazilianFormatLayout)
+	}
+	*createdAt = t.CreatedAt.Format(BrazilianFormatLayout)
+
+	fmt.Printf(TaskInfo, t.ID, t.Description, t.Status, *createdAt, *updatedAt)
 }
 
 func NewCommand() *RootCmd {
