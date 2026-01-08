@@ -43,13 +43,8 @@ func (exec *Executable) CreateTask() *cobra.Command {
 			}
 
 			// read the whole file
-			if _, err := exec.file.Seek(0, io.SeekStart); err != nil {
-				log.Println("seek failed:", err)
-				return
-			}
-			data, err := io.ReadAll(exec.file)
+			data, err := readFile(exec)
 			if err != nil {
-				log.Println("read failed:", err)
 				return
 			}
 
@@ -92,7 +87,51 @@ func (exec *Executable) CreateTask() *cobra.Command {
 	}
 }
 
+func (exec *Executable) UpdateTask() *cobra.Command {
+	return &cobra.Command{
+		Use:   "update [id] [description]",
+		Short: "Update a task description based on the id",
+		Args:  cobra.ExactArgs(2),
+		Run: func(cmd *cobra.Command, args []string) {
+			//TODO: Implement this
+		},
+	}
+}
 
+func (exec *Executable) DeleteTask() *cobra.Command {
+	return &cobra.Command{
+		Use:   "detele [id]",
+		Short: "Delete a task based on the id",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			//TODO: Implement this
+		},
+	}
+}
+
+// TODO: Check if it's possible to use a switch case instead of multiple functions doing basically the same thing
+func (exec *Executable) MarkInProgressTask() *cobra.Command {
+	return &cobra.Command{
+		Use:   "mark-in-progress [id]",
+		Short: `Set a task as "in progress" based on the id`,
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			//TODO: Implement this
+		},
+	}
+}
+
+// TODO: Check if it's possible to use a switch case instead of multiple functions doing basically the same thing
+func (exec *Executable) ListTasks() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: `List all the task, using some flags to define if you want some filters`,
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			//TODO: Implement this
+		},
+	}
+}
 
 func NewCommand(f *os.File) *Executable {
 	var id uint64 = 1
@@ -121,4 +160,17 @@ func NewCommand(f *os.File) *Executable {
 
 	exec.cmd = cmd
 	return exec
+}
+
+func readFile(exec *Executable) ([]byte, error) {
+	if _, err := exec.file.Seek(0, io.SeekStart); err != nil {
+		log.Println("seek failed:", err)
+		return nil, err
+	}
+	data, err := io.ReadAll(exec.file)
+	if err != nil {
+		log.Println("read failed:", err)
+		return nil, err
+	}
+	return data, nil
 }
