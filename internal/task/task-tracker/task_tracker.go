@@ -1,9 +1,7 @@
 package tasktracker
 
 import (
-	"bytes"
 	"encoding/json"
-	"io"
 	"log"
 	"os"
 	"time"
@@ -13,81 +11,64 @@ import (
 )
 
 const (
+	// Path
+	Path = "storage/tasks.json"
+
+	// File Mode
+	OwnerPropertyMode = 0644
+
+	// Enum
 	InitStatus  model.StatusTask = "init"
 	DoingStatus model.StatusTask = "doing"
 	DoneStatus  model.StatusTask = "done"
 )
 
-type Executable struct {
-	incID uint64
-	cmd   *cobra.Command
-	file  *os.File
+type RootCmd struct {
+	cmd *cobra.Command
 }
 
-func (exec *Executable) Execute() error {
+func (exec *RootCmd) Execute() error {
 	return exec.cmd.Execute()
 }
 
 // CreateTask adds the task to the json file...
-func (exec *Executable) CreateTask() *cobra.Command {
+func (exec *RootCmd) CreateTask() *cobra.Command {
 	return &cobra.Command{
 		Use:   "add [description]",
 		Short: "Create a new task with the description",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
+			tasks, err := getTasks()
+			if err != nil {
+				return
+			}
+
+			var id uint64 = 1
+			if len(tasks) > 0 {
+				id = tasks[len(tasks)-1].ID + 1
+			}
+
 			task := model.Task{
-				ID:          exec.incID,
+				ID:          id,
 				Description: args[0],
 				Status:      InitStatus,
 				CreatedAt:   time.Now(),
 			}
 
-			// read the whole file
-			data, err := readFile(exec)
-			if err != nil {
-				return
-			}
+			log.Println("Tasks:", tasks)
 
-			var tasks []model.Task
-			if len(bytes.TrimSpace(data)) > 0 {
-				if err := json.Unmarshal(data, &tasks); err != nil {
-					log.Println("Could not create a new task,", err.Error())
-					return
-				}
-			} else {
-				tasks = make([]model.Task, 0)
-			}
-
-			// Append and marshal
 			tasks = append(tasks, task)
-			out, err := json.MarshalIndent(tasks, "", "  ")
+
+			log.Println("Tasks:", tasks)
+			err = writeFile(tasks)
 			if err != nil {
-				log.Println("could not marshal tasks:", err)
 				return
 			}
-
-			// Truncate and write back
-			if err := exec.file.Truncate(0); err != nil {
-				log.Println("truncate failed:", err)
-				return
-			}
-
-			if _, err := exec.file.Seek(0, io.SeekStart); err != nil {
-				log.Println("seek failed:", err)
-				return
-			}
-
-			if _, err := exec.file.Write(out); err != nil {
-				log.Println("[ERROR] write failed:", err)
-				return
-			}
-
-			exec.incID++
 		},
 	}
 }
 
-func (exec *Executable) UpdateTask() *cobra.Command {
+func (exec *RootCmd) UpdateTask() *cobra.Command {
 	return &cobra.Command{
 		Use:   "update [id] [description]",
 		Short: "Update a task description based on the id",
@@ -98,7 +79,7 @@ func (exec *Executable) UpdateTask() *cobra.Command {
 	}
 }
 
-func (exec *Executable) DeleteTask() *cobra.Command {
+func (exec *RootCmd) DeleteTask() *cobra.Command {
 	return &cobra.Command{
 		Use:   "detele [id]",
 		Short: "Delete a task based on the id",
@@ -110,7 +91,7 @@ func (exec *Executable) DeleteTask() *cobra.Command {
 }
 
 // TODO: Check if it's possible to use a switch case instead of multiple functions doing basically the same thing
-func (exec *Executable) MarkInProgressTask() *cobra.Command {
+func (exec *RootCmd) MarkInProgressTask() *cobra.Command {
 	return &cobra.Command{
 		Use:   "mark-in-progress [id]",
 		Short: `Set a task as "in progress" based on the id`,
@@ -122,7 +103,7 @@ func (exec *Executable) MarkInProgressTask() *cobra.Command {
 }
 
 // TODO: Check if it's possible to use a switch case instead of multiple functions doing basically the same thing
-func (exec *Executable) ListTasks() *cobra.Command {
+func (exec *RootCmd) ListTasks() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: `List all the task, using some flags to define if you want some filters`,
@@ -133,27 +114,15 @@ func (exec *Executable) ListTasks() *cobra.Command {
 	}
 }
 
-func NewCommand(f *os.File) *Executable {
-	var id uint64 = 1
-
-	if _, err := f.Seek(0, io.SeekStart); err == nil {
-		data, err := io.ReadAll(f)
-		if err == nil && len(bytes.TrimSpace(data)) > 0 {
-			var tasks []model.Task
-			if err := json.Unmarshal(data, &tasks); err == nil {
-				for _, t := range tasks {
-					if t.ID >= id {
-						id = t.ID + 1
-					}
-				}
-			}
+func NewCommand() *RootCmd {
+	_, err := os.Stat(Path)
+	if err != nil {
+		if err := os.WriteFile(Path, []byte("[]"), OwnerPropertyMode); err != nil {
+			log.Fatal("Couldn't create the needed file,", err.Error())
 		}
 	}
 
-	exec := &Executable{
-		incID: id,
-		file:  f,
-	}
+	exec := &RootCmd{}
 
 	cmd := &cobra.Command{}
 	cmd.AddCommand(exec.CreateTask())
@@ -162,15 +131,43 @@ func NewCommand(f *os.File) *Executable {
 	return exec
 }
 
-func readFile(exec *Executable) ([]byte, error) {
-	if _, err := exec.file.Seek(0, io.SeekStart); err != nil {
-		log.Println("seek failed:", err)
-		return nil, err
-	}
-	data, err := io.ReadAll(exec.file)
+func getTasks() ([]model.Task, error) {
+	f, err := os.OpenFile(Path, os.O_RDWR|os.O_CREATE, OwnerPropertyMode)
 	if err != nil {
-		log.Println("read failed:", err)
+		log.Fatal("Couldn't open the storage file,", err.Error())
+	}
+	defer f.Close()
+
+	buffer := make([]byte, 4096)
+	length := 0
+	for {
+		n, err := f.Read(buffer[length:])
+		if err != nil {
+			break
+		}
+		length += n
+	}
+
+	var tasks []model.Task
+	if err := json.Unmarshal(buffer[:length], &tasks); err != nil {
+		log.Println("[ERROR] unmarshiling went wrong:", err.Error())
 		return nil, err
 	}
-	return data, nil
+
+	return tasks, nil
+}
+
+func writeFile(tasks []model.Task) error {
+	data, err := json.Marshal(tasks)
+	if err != nil {
+		log.Println("didn't marshal data:", err.Error())
+		return err
+	}
+
+	err = os.WriteFile(Path, data, OwnerPropertyMode)
+	if err != nil {
+		log.Println("Somehow I coded poorly, couldn't write file:", err.Error())
+		return err
+	}
+	return nil
 }
