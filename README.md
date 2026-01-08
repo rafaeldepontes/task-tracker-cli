@@ -13,7 +13,7 @@ Do this:
 ```bash
 git clone <...>
 go mod tidy
-go build -o ./bin
+go build -o ./bin/
 ```
 
 And add the bin directory to your env variables and feel free to use...
