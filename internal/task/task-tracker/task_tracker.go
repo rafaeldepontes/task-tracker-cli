@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -13,10 +14,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	// Path
-	Path = "storage/tasks.json"
+// Path
+var Path = "storage/tasks.json"
 
+const (
 	// File Mode
 	OwnerPropertyMode = 0644
 
@@ -107,7 +108,7 @@ func (exec *RootCmd) DeleteTask() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			tasks, err := readFile()
 			if err != nil {
-				log.Println("couldn't read from the storage file:", err.Error())
+				log.Println("couldn't read from the storage file: ", err.Error())
 				return
 			}
 
@@ -256,12 +257,12 @@ func printTask(t *model.Task, updatedAt *string, createdAt *string) {
 }
 
 func NewCommand() *RootCmd {
-	_, err := os.Stat(Path)
+	path, err := initStorage()
 	if err != nil {
-		if err := os.WriteFile(Path, []byte("[]"), OwnerPropertyMode); err != nil {
-			log.Fatal("Couldn't create the needed file,", err.Error())
-		}
+		log.Fatal("storage init failed:", err)
 	}
+
+	Path = path
 
 	rootCmd := &RootCmd{}
 
@@ -280,7 +281,7 @@ func NewCommand() *RootCmd {
 func readFile() ([]model.Task, error) {
 	f, err := os.OpenFile(Path, os.O_RDWR|os.O_CREATE, OwnerPropertyMode)
 	if err != nil {
-		log.Fatal("Couldn't open the storage file,", err.Error())
+		log.Fatal("Couldn't open the storage file, ", err.Error())
 		return nil, err
 	}
 	defer f.Close()
@@ -297,7 +298,7 @@ func readFile() ([]model.Task, error) {
 
 	var tasks []model.Task
 	if err := json.Unmarshal(buffer[:length], &tasks); err != nil {
-		log.Println("[ERROR] unmarshiling went wrong:", err.Error())
+		log.Println("[ERROR] unmarshiling went wrong: ", err.Error())
 		return nil, err
 	}
 
@@ -307,13 +308,13 @@ func readFile() ([]model.Task, error) {
 func writeFile(tasks []model.Task) error {
 	data, err := json.Marshal(tasks)
 	if err != nil {
-		log.Println("didn't marshal data:", err.Error())
+		log.Println("didn't marshal data: ", err.Error())
 		return err
 	}
 
 	err = os.WriteFile(Path, data, OwnerPropertyMode)
 	if err != nil {
-		log.Println("Somehow I coded poorly, couldn't write file:", err.Error())
+		log.Println("Somehow I coded poorly, couldn't write file: ", err.Error())
 		return err
 	}
 	return nil
@@ -323,7 +324,7 @@ func writeFile(tasks []model.Task) error {
 func searchTaks(strID string, tasks []model.Task) (int, error) {
 	id_, err := strconv.ParseInt(strID, 10, 64)
 	if err != nil {
-		log.Println(`[ERROR] didn't parsed the id:`, err.Error())
+		log.Println(`[ERROR] didn't parsed the id: `, err.Error())
 		return 0, err
 	}
 	id := uint64(id_)
@@ -341,4 +342,26 @@ func searchTaks(strID string, tasks []model.Task) (int, error) {
 		return 0, errors.New("Task not found")
 	}
 	return pos, nil
+}
+
+func initStorage() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+
+	base := filepath.Join(dir, "task-cli")
+	path := filepath.Join(base, "tasks.json")
+
+	if err := os.MkdirAll(base, 0755); err != nil {
+		return "", err
+	}
+
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		if err := os.WriteFile(path, []byte("[]"), 0644); err != nil {
+			return "", err
+		}
+	}
+
+	return path, nil
 }
