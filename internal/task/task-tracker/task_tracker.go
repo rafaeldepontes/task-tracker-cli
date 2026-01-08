@@ -2,8 +2,10 @@ package tasktracker
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/rafaeldepontes/task-tracker-cli/internal/task/model"
@@ -31,14 +33,13 @@ func (exec *RootCmd) Execute() error {
 	return exec.cmd.Execute()
 }
 
-// CreateTask adds the task to the json file...
 func (exec *RootCmd) CreateTask() *cobra.Command {
 	return &cobra.Command{
 		Use:   "add [description]",
 		Short: "Create a new task with the description",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			tasks, err := getTasks()
+			tasks, err := readFile()
 			if err != nil {
 				return
 			}
@@ -54,16 +55,14 @@ func (exec *RootCmd) CreateTask() *cobra.Command {
 				Status:      InitStatus,
 				CreatedAt:   time.Now(),
 			}
-
-			log.Println("Tasks:", tasks)
-
 			tasks = append(tasks, task)
 
-			log.Println("Tasks:", tasks)
 			err = writeFile(tasks)
 			if err != nil {
 				return
 			}
+
+			log.Printf("Task added successfully (ID: %d)\n", id)
 		},
 	}
 }
@@ -74,30 +73,105 @@ func (exec *RootCmd) UpdateTask() *cobra.Command {
 		Short: "Update a task description based on the id",
 		Args:  cobra.ExactArgs(2),
 		Run: func(cmd *cobra.Command, args []string) {
-			//TODO: Implement this
+			tasks, err := readFile()
+			if err != nil {
+				return
+			}
+
+			pos, err := searchTaks(args[0], tasks)
+			if err != nil {
+				return
+			}
+
+			tasks[pos].Description = args[1]
+			err = writeFile(tasks)
+			if err != nil {
+				return
+			}
+
+			log.Printf("Task updated successfully (ID: %d)\n", tasks[pos].ID)
 		},
 	}
 }
 
 func (exec *RootCmd) DeleteTask() *cobra.Command {
 	return &cobra.Command{
-		Use:   "detele [id]",
+		Use:   "delete [id]",
 		Short: "Delete a task based on the id",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			//TODO: Implement this
+			tasks, err := readFile()
+			if err != nil {
+				log.Println("couldn't read from the storage file:", err.Error())
+				return
+			}
+
+			pos, err := searchTaks(args[0], tasks)
+			if err != nil {
+				return
+			}
+
+			tasks = append(tasks[:pos], tasks[pos+1:]...)
+			err = writeFile(tasks)
+			if err != nil {
+				return
+			}
+
+			log.Println("Task removed successfully")
 		},
 	}
 }
 
-// TODO: Check if it's possible to use a switch case instead of multiple functions doing basically the same thing
 func (exec *RootCmd) MarkInProgressTask() *cobra.Command {
 	return &cobra.Command{
 		Use:   "mark-in-progress [id]",
 		Short: `Set a task as "in progress" based on the id`,
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			//TODO: Implement this
+			tasks, err := readFile()
+			if err != nil {
+				return
+			}
+
+			pos, err := searchTaks(args[0], tasks)
+			if err != nil {
+				return
+			}
+
+			tasks[pos].Status = DoingStatus
+			err = writeFile(tasks)
+			if err != nil {
+				return
+			}
+
+			log.Println("Task marked as in progress!")
+		},
+	}
+}
+
+func (exec *RootCmd) MarkDoneTask() *cobra.Command {
+	return &cobra.Command{
+		Use:   "mark-done [id]",
+		Short: `Set a task as "done" based on the id`,
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			tasks, err := readFile()
+			if err != nil {
+				return
+			}
+
+			pos, err := searchTaks(args[0], tasks)
+			if err != nil {
+				return
+			}
+
+			tasks[pos].Status = DoneStatus
+			err = writeFile(tasks)
+			if err != nil {
+				return
+			}
+
+			log.Println("Task marked as done!")
 		},
 	}
 }
@@ -109,7 +183,7 @@ func (exec *RootCmd) ListTasks() *cobra.Command {
 		Short: `List all the task, using some flags to define if you want some filters`,
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
-			//TODO: Implement this
+			// TODO: Implement this
 		},
 	}
 }
@@ -122,19 +196,25 @@ func NewCommand() *RootCmd {
 		}
 	}
 
-	exec := &RootCmd{}
+	rootCmd := &RootCmd{}
 
 	cmd := &cobra.Command{}
-	cmd.AddCommand(exec.CreateTask())
+	cmd.AddCommand(rootCmd.ListTasks())
+	cmd.AddCommand(rootCmd.CreateTask())
+	cmd.AddCommand(rootCmd.UpdateTask())
+	cmd.AddCommand(rootCmd.DeleteTask())
+	cmd.AddCommand(rootCmd.MarkDoneTask())
+	cmd.AddCommand(rootCmd.MarkInProgressTask())
 
-	exec.cmd = cmd
-	return exec
+	rootCmd.cmd = cmd
+	return rootCmd
 }
 
-func getTasks() ([]model.Task, error) {
+func readFile() ([]model.Task, error) {
 	f, err := os.OpenFile(Path, os.O_RDWR|os.O_CREATE, OwnerPropertyMode)
 	if err != nil {
 		log.Fatal("Couldn't open the storage file,", err.Error())
+		return nil, err
 	}
 	defer f.Close()
 
@@ -170,4 +250,28 @@ func writeFile(tasks []model.Task) error {
 		return err
 	}
 	return nil
+}
+
+// searchTaks returns the task position in the underlying array and an error if any.
+func searchTaks(strID string, tasks []model.Task) (int, error) {
+	id_, err := strconv.ParseInt(strID, 10, 64)
+	if err != nil {
+		log.Println(`[ERROR] didn't parsed the id:`, err.Error())
+		return 0, err
+	}
+	id := uint64(id_)
+
+	pos := -1
+	for i, t := range tasks {
+		if t.ID == id {
+			pos = i
+			break
+		}
+	}
+
+	if pos == -1 {
+		log.Println(`Task not found with id:`, strID)
+		return 0, errors.New("Task not found")
+	}
+	return pos, nil
 }
